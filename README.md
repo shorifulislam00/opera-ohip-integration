@@ -1,241 +1,489 @@
-# Opera OHIP Integration — PMS Sync
+# Opera (OHIP) — PMS Integration
 
-Seamless two-way synchronization between Oracle Opera Cloud (OHIP API) and a PHP/CI3 Property Management System (PMS). Syncs reservations, registrations, charges, and folio services in real-time or on-demand via CLI.
-
-## Features
-
-- **Reservation Sync (Opera → PMS)** — All Opera reservations (Reserved, Cancelled, InHouse) mirrored into `fo_reservations` with status mapping, guest records, and room type matching.
-- **Registration Sync (Opera → PMS)** — In-house Opera reservations become PMS registrations with room assignment, per-night room bills, guest profiles, and linked reservations.
-- **Restaurant Charge Posting (PMS → Opera)** — Paid restaurant bills posted to Opera guest folios via the OHIP charges endpoint, with configurable transaction codes per outlet.
-- **Folio Service Sync (Opera → PMS)** — Opera folio postings (mini-bar, laundry, telephone, etc.) imported as PMS service bills with dedup protection.
-
-## Architecture
+## Architecture Overview
 
 ```
-┌──────────────┐      OHIP REST API      ┌──────────────────────────┐
-│  Opera Cloud  │ ◄──────────────────────► │      PMS (CI3)            │
-│ (Oracle HMS)  │                          │                            │
-└──────────────┘                          │  OhipClient (Auth/HTTP)     │
-                                           │  OhipReservationSync        │
-                                           │  OhipFolioSync              │
-                                           │  OhipPosting                │
-                                           │  Ohip_sync_model (DB)       │
-                                           │  OhipSync (CLI Controller)  │
-                                           └────────────────────────────┘
+┌──────────────┐      OHIP REST API      ┌──────────────────────┐
+│   Opera Cloud │ ◄──────────────────────► │   PMS (CI3)          │
+│  (Oracle/HMS) │                          │                      │
+└──────────────┘                          │  OhipClient           │
+                                           │  OhipReservation      │
+                                           │  OhipPosting          │
+                                           │  OhipFolioSync        │
+                                           │  OhipReservationSync  │
+                                           │  Ohip_sync_model      │
+                                           └──────────────────────┘
 ```
 
-### Sync Directions
+Integration direction:
 
 | Direction | Data | PMS → Opera | Opera → PMS |
 |-----------|------|:-----------:|:-----------:|
-| Reservation List | All reservations (any status) | | ✓ |
-| InHouse Registration | Checked-in guests | | ✓ |
-| Restaurant Charges | Paid restaurant bills | ✓ | |
-| Folio Services | Mini-bar, laundry, etc. | | ✓ |
+| Reservation list + registration sync | Reservations + registrations (all statuses) | | ✓ |
+| Restaurant charge posting | Restaurant bills | ✓ | |
+| Folio service sync | Folio charges (mini-bar, laundry, etc.) | | ✓ |
 
-## Prerequisites
+---
 
-- PHP 7.4+ with cURL
-- MySQL 5.7+ / MariaDB 10.3+
-- Oracle Opera Cloud account with OHIP API access
-- Opera API credentials: Client ID, Client Secret, App Key, Enterprise ID, Hotel ID, Cashier ID
+## 1. Base Setup
 
-## Installation
+### 1.1 Database Config Table
 
-### 1. Database Configuration
+Create `sys_opera_config` with these columns:
 
-Create the `sys_opera_config` table:
+| Column | Type | Purpose |
+|--------|------|---------|
+| `hostname` | VARCHAR | OHIP base URL |
+| `hotel_id` | VARCHAR | Opera hotel/enterprise ID |
+| `app_key` | VARCHAR | x-app-key header |
+| `enterprise_id` | VARCHAR | Enterprise ID for token auth |
+| `client_id` / `client_secret` | VARCHAR | Basic auth credentials |
+| `cashier_id` | VARCHAR | Cashier ID for charge posting |
 
+### 1.2 Token Cache Table
+
+`ohip_tokens` — stores OAuth2 access token:
+
+| Column | Type |
+|--------|------|
+| `access_token` | TEXT |
+| `expires_at` | INT (unix timestamp) |
+| `created_at` | DATETIME |
+
+### 1.3 DB Schema Changes (Migrations)
+
+#### 2026060700001 — `fo_registrations.opera_id`
 ```sql
-CREATE TABLE `sys_opera_config` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `hostname` VARCHAR(255) NOT NULL COMMENT 'OHIP base URL',
-    `hotel_id` VARCHAR(50) NOT NULL,
-    `app_key` VARCHAR(255) NOT NULL,
-    `enterprise_id` VARCHAR(100) NOT NULL,
-    `client_id` VARCHAR(255) NOT NULL,
-    `client_secret` VARCHAR(255) NOT NULL,
-    `cashier_id` VARCHAR(50) NOT NULL
-);
+ALTER TABLE fo_registrations ADD COLUMN opera_id VARCHAR(50) UNIQUE AFTER id;
 ```
 
-Create the OAuth token cache table:
-
+#### 2026060700002 — Restaurant charge posting columns
 ```sql
-CREATE TABLE `ohip_tokens` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `access_token` TEXT NOT NULL,
-    `expires_at` INT NOT NULL,
-    `created_at` DATETIME NOT NULL
-);
+ALTER TABLE tbl_tablefloor ADD COLUMN transaction_code VARCHAR(50);
+ALTER TABLE multipay_bill ADD COLUMN opera_sync TINYINT(1) DEFAULT 0;
 ```
 
-### 2. Run Migrations
-
-Apply these schema changes (order matters):
-
-| # | Migration | Change |
-|---|-----------|--------|
-| 1 | `fo_registrations` | Add `opera_id` VARCHAR(50) UNIQUE |
-| 2 | `tbl_tablefloor` | Add `transaction_code` VARCHAR(50) |
-| 3 | `multipay_bill` | Add `opera_sync` TINYINT(1) DEFAULT 0 |
-| 4 | `fo_services` | Add `transaction_code` VARCHAR(50) |
-| 5 | `housekeeping_services` | Add `transaction_code` VARCHAR(50) |
-| 6 | `fo_service_bills` | Add `opera_posting_no` VARCHAR(50) |
-| 7 | `housekeeping_service_bills` | Add `opera_posting_no` VARCHAR(50) |
-| 8 | `fo_reservations` | Add `opera_id` VARCHAR(50) |
-| 9 | `roomdetails` | Add `opera_code` VARCHAR(50) |
-
-See `application/migrations/` for the standalone SQL migration files.
-
-### 3. Deploy Files
-
-Copy these files into your CI3 project:
-
-```
-application/
-├── controllers/
-│   └── OhipSync.php                    # CLI entry points
-├── models/
-│   └── Ohip_sync_model.php             # All DB operations
-└── libraries/
-    ├── OhipClient.php                  # Base: auth, token, HTTP
-    ├── OhipReservation.php             # Reservation API calls
-    ├── OhipPosting.php                 # Charge posting
-    ├── OhipFolioSync.php               # Folio fetch + service sync
-    └── OhipReservationSync.php         # Reservation list + sync
+#### 2026060800001 — FO/HK service transaction codes
+```sql
+ALTER TABLE fo_services ADD COLUMN transaction_code VARCHAR(50);
+ALTER TABLE housekeeping_services ADD COLUMN transaction_code VARCHAR(50);
 ```
 
-### 4. Populate Mapping Data
+#### 2026060800002 — `opera_posting_no` on bill tables
+```sql
+ALTER TABLE fo_service_bills ADD COLUMN opera_posting_no VARCHAR(50) AFTER service_no;
+ALTER TABLE housekeeping_service_bills ADD COLUMN opera_posting_no VARCHAR(50) AFTER service_no;
+```
 
-These tables require manual data to match Opera codes with PMS records:
+#### 2026060800003 — `fo_reservations.opera_id`
+```sql
+ALTER TABLE fo_reservations ADD COLUMN opera_id VARCHAR(50) AFTER id;
+```
 
-| Table | Column | Purpose |
-|-------|--------|---------|
-| `tbl_tablefloor` | `transaction_code` | Opera transaction code per restaurant outlet |
-| `fo_services` | `transaction_code` | Opera transaction code per FO service item |
-| `housekeeping_services` | `transaction_code` | Opera transaction code per HK service item |
-| `roomdetails` | `opera_code` | Opera room type name (e.g. `"DBL"`, `"SUI"`) |
+#### 2026060800004 — `roomdetails.opera_code`
+```sql
+ALTER TABLE roomdetails ADD COLUMN opera_code VARCHAR(50);
+```
 
-## Usage
+#### 2026061100001 — `payment_method.opera_code`, drop `opera_payment_method_mapping`
+```sql
+ALTER TABLE payment_method ADD COLUMN opera_code VARCHAR(50);
+DROP TABLE opera_payment_method_mapping;
+```
 
-All sync operations are CLI commands:
+#### 2026061100002 — Seed `roomdetails.opera_code`
+Seeds KNES (Jun Suite), KNPS (Premium), TNPS (Twin Premium), KNXB (Deluxe), KNEP (Exec Suite), KNEB (Suite).
 
-```bash
-# 1. Sync in-house Opera reservations → PMS registrations
-php index.php OhipSync registrations
+---
 
-# 2. Sync all Opera reservations → PMS reservations
-php index.php OhipSync reservations 2026-01-01
+## 2. Authentication (OhipClient)
 
-# 3. Post paid restaurant bills → Opera folios
+**File:** `application/libraries/OhipClient.php`
+
+### Flow
+
+1. **Token retrieval** — POST to `/oauth/v1/tokens` with:
+   - `Authorization: Basic base64(client_id:client_secret)`
+   - `x-app-key: <app_key>`
+   - `enterpriseId: <enterprise_id>`
+   - Body: `grant_type=client_credentials&scope=urn:opc:hgbu:ws:__myscopes__`
+2. **Token caching** — stored in `ohip_tokens` table, reused until near expiration (60s buffer).
+3. **API calls** — every request includes:
+   - `Authorization: Bearer <token>`
+   - `x-app-key: <app_key>`
+   - `x-hotelId: <hotel_id>`
+   - `Content-Type: application/json`
+   - `x-Request-Id: <uuid>`
+
+### Base `request()` method
+
+```php
+protected function request($method, $path, $body = null)
+```
+
+Returns `['status' => HTTP_CODE, 'body' => decoded_json]`.
+
+---
+
+## 3. Unified Reservation Sync (Opera → PMS `fo_reservations` + `fo_registrations`)
+
+**Purpose:** Single batch process that:
+- Creates/updates `fo_reservations` for all statuses (Reserved, InHouse, CheckedOut, Cancelled)
+- Creates/updates `fo_registrations` for InHouse and CheckedOut stays
+- Marks registrations as checked out for CheckedOut status
+- Generates per-night `fo_room_bills` with service charge and VAT
+
+### Files
+- `OhipReservationSync` (library) — fetches list via API, orchestrates per-item
+- `Ohip_sync_model` — `createReservation()`, `updateReservation()`, `syncRegistrationFromList()`, `syncRoomBills()`, `markRegistrationCheckedOut()`
+
+### Endpoint
+
+**GET** `/rsv/v1/hotels/{hotelId}/reservations?lastModifyStartDate={date}&limit={n}&offset={n}`
+
+Uses `lastModifyStartDate` (not `createdOnStartDate`) to catch all modifications: status changes, guest edits, date/rate changes, cancellations.
+
+### Pagination
+
+Full pagination via `offset`/`hasMore` — fetches up to 500 items per page.
+
+### List Response Structure
+
+```
+reservations.reservationInfo[]
+  ├── reservationIdList[]
+  │     └── { type: "Reservation", id: "12345" }
+  ├── reservationStatus          ← "Reserved" | "Cancelled" | "InHouse" | "CheckedOut"
+  ├── lastModifyDateTime
+  ├── reservationGuest
+  │     ├── givenName, surname, nameTitle
+  │     ├── phoneNumber, email
+  │     └── address.{streetAddress, country.code}
+  └── roomStay
+        ├── arrivalDate, departureDate
+        ├── roomType, roomId
+        ├── adultCount, childCount
+        └── rateAmount.amount
+```
+
+### Sync Algorithm (`syncReservations($startDate)`)
+
+```
+for each item in paginated list:
+    1. Extract operaId from reservationIdList[type=Reservation].id
+    2. Reservation sync (all statuses):
+       - If exists in fo_reservations → updateReservation()
+       - Else → createReservation()
+    3. Registration sync (only InHouse / CheckedOut):
+       - Call syncRegistrationFromList() — uses list data, no extra API call
+       - Creates/updates fo_registrations, fo_registration_room_details, fo_guests
+       - Calls syncRoomBills() to generate fo_room_bills (one row per night)
+    4. Checkout mark (only CheckedOut):
+       - markRegistrationCheckedOut(regId, departureDate)
+```
+
+### Room Bills (`syncRoomBills()`)
+
+Generated per-night from arrival to departure (min 1 night). Formula using settings:
+
+```
+service_charge  = rate × (settings.service_charge_for_rooms / 100)
+vat_charge      = (rate + service_charge) × (settings.vat_for_rooms / 100)
+total           = rate + service_charge + vat_charge
+```
+
+Dedup by `UNIQUE(date, room, registration_id)` on `fo_room_bills`.
+
+### Status Mappings
+
+| Opera Status | `fo_reservations.status` | Registration synced? | `fo_registrations.checkout_status` |
+|-------------|:------------------------:|:--------------------:|:----------------------------------:|
+| Reserved    | 1 (Confirmed)            | No                   | N/A |
+| InHouse     | 1 (Confirmed)            | Yes                  | 0 (Active) |
+| CheckedOut  | 1 (Confirmed)            | Yes                  | 1 (Checked out) + `checkout_date` = `departureDate` |
+| Cancelled   | 3 (Cancelled)            | No                   | N/A |
+
+### CLI
+
+```
+php index.php OhipSync reservations
+```
+
+Uses `app_date - 7 days` as the `lastModifyStartDate`.
+
+---
+
+## 4. Restaurant Charge Posting (PMS → Opera)
+
+**Purpose:** Post paid restaurant bills from PMS to Opera guest folios, including payment.
+
+### Files
+- `OhipPosting` (library) — `postCharge()`, `postChargesAndPayments()`
+- `Ohip_sync_model::getPendingMultipayBills()` — query
+- `OhipSync::restaurant_charges()` — controller action
+
+### Data Flow
+
+```
+multipay_bill ──order_id──► customer_order ──outlet_id──► tbl_tablefloor
+                                                               │
+                                                      transaction_code
+                                                               │
+                                                    (Opera transaction code)
+```
+
+### Payment Type Mapping
+
+| `payment_type_id` | Type | Opera code | Source |
+|:-----------------:|------|:----------:|--------|
+| 1 | Cash | CA | `payment_method.opera_code` |
+| 2 | Card | VA | `payment_method.opera_code` |
+| 3 | Bank | BT | `payment_method.opera_code` |
+| 4 | M-Banking | BK/UP/NGB | `acc_automation.m_banking_head_code_name` by `multipay_bill.bank_name` |
+| 5 | Company | CL | `payment_method.opera_code` |
+| 8 | Room Transfer | — | No payment posted; charge only via `/charges` endpoint |
+
+### Query: `getPendingMultipayBills()`
+
+Selects bills where:
+- `multipay_bill.opera_sync = 0` (not yet posted)
+- `multipay_bill.payment_status = 1` (paid)
+
+Joins: `multipay_bill → customer_order → fo_registrations → tbl_tablefloor`
+
+### Charge + Payment Endpoint
+
+**POST** `/csh/v1/hotels/{hotelId}/reservations/{reservationId}/chargesAndPayments`
+
+Flat payload (no `criteria` wrapper):
+
+```json
+{
+  "charges": [{
+    "transactionCode": "<tbl_tablefloor.transaction_code>",
+    "price": { "amount": 123.45, "currencyCode": "BDT" },
+    "postingQuantity": 1,
+    "checkNumber": "<order_id>",
+    "applyRoutingInstructions": false,
+    "usePackageAllowance": false,
+    "folioWindowNo": 1
+  }],
+  "payments": [{
+    "paymentMethod": { "paymentMethod": "CA" },
+    "postingAmount": { "amount": 123.45, "currencyCode": "BDT" },
+    "action": "Payment",
+    "folioWindowNo": 1
+  }],
+  "cashierId": <getCashierId()>
+}
+```
+
+- `cashierId` must be a number (not string)
+- `amount` must be a float
+- `folioWindowNo` must be an integer
+- HTTP 200 with empty body = success
+
+### Room Transfer Flow
+
+If `payment_type_id = 8` (Room Transfer):
+- Post charge only via `/charges` endpoint (no payment)
+- Charge goes to guest's `opera_id`
+- Payment handled at checkout in Opera
+
+### Walk-in Orders
+
+If `multipay_bill.registration_id IS NULL` (walk-in), falls back to PM reservation set in `sys_opera_config`.
+
+### CLI
+
+```
 php index.php OhipSync restaurant_charges
+```
 
-# 4. Import Opera folio postings → PMS service bills
+---
+
+## 5. Folio Service Sync (Opera → PMS Service Bills)
+
+**Purpose:** Fetch folio postings from Opera (mini-bar, laundry, telephone, extra bed, etc.) and create/update PMS service bills with service charge and VAT.
+
+### Files
+- `OhipFolioSync` (library) — fetches folios, extracts postings, orchestrates per-posting
+- `Ohip_sync_model` — `createServiceBillFromPosting()`, `findFoServiceByTransactionCode()`, `findHousekeepingServiceByTransactionCode()`
+
+### Step 1: Fetch folio (multi-window)
+
+**GET** `/csh/v1/hotels/{hotelId}/reservations/{reservationId}/folios?limit=300&fetchInstructions=Postings&fetchInstructions=Totalbalance&fetchInstructions=Transactioncodes&fetchInstructions=Windowbalances`
+
+The API returns multiple folio windows in one call, but sometimes a window's folios are not included if capacity is consumed by earlier windows. The `getFolio()` method handles this by:
+
+1. First call: discover all windows (no `folioWindowNo` filter)
+2. If a window has `emptyFolio: true` and `emptyWindow: false`, it means folios exist but weren't returned — fetch that window individually with `folioWindowNo=N`
+3. Merge all postings from all windows
+
+### Response Structure
+
+```
+reservationFolioInformation.folioWindows[]
+  └── folios[]
+        └── postings[]
+              ├── transactionCode      ← maps to PMS service
+              ├── transactionNo        ← unique posting ID (dedup)
+              ├── postedAmount.amount
+              ├── transactionType      ← Revenue / Payment
+              ├── creditAmount | debitAmount
+              ├── remark
+              ├── transactionDate / postingDate
+              └── postingQuantity
+```
+
+### Sync Algorithm (`syncServices()`)
+
+```
+for each posting in merged postings:
+    if no transactionCode → error
+
+    fo_service = findFoServiceByTransactionCode(txn_code)
+    hk_service = findHousekeepingServiceByTransactionCode(txn_code)
+
+    if neither found → skip (no mapping configured)
+
+    → createServiceBillFromPosting(...)   ← handles both insert and update
+```
+
+### Service Bill Upsert (`createServiceBillFromPosting()`)
+
+Checks if a bill with `opera_posting_no` already exists in `fo_service_bills`:
+- **Exists** → updates existing row (both `fo_service_bills` and `housekeeping_service_bills` for HK services)
+- **New** → inserts with fresh service numbers
+
+Financial calculation using settings:
+
+```
+sc_value     = amount × (settings.service_charge_for_rooms / 100)
+vat_amount   = (amount + sc_value) × (settings.vat_for_rooms / 100)
+grand_total  = amount + sc_value + vat_amount
+```
+
+Table fields:
+
+| Field | Value |
+|-------|-------|
+| `service_charge` | Calculated SC value (sc_value) |
+| `vat_amount` | Calculated VAT |
+| `grand_total` | amount + sc_value + vat |
+| `amount` | Raw Opera posting amount (line total) |
+| `service_rate` | amount / qty |
+| `service_qty` | postingQuantity |
+| `opera_posting_no` | posting.transactionNo (dedup) |
+
+#### HK Service flow
+- Insert/update in `housekeeping_service_bills`
+- Insert/update in `fo_service_bills` (with `hk_service.category_id`)
+
+#### FO-only Service flow
+- Insert/update in `fo_service_bills` (with `fo_service.id`)
+
+### Transaction Code Mapping
+
+Pre-populate these with Opera transaction codes:
+
+| Table | Column | Example |
+|-------|--------|---------|
+| `fo_services` | `transaction_code` | `"1002"` (Extra Bed), `"LAUNDRY"` |
+| `housekeeping_services` | `transaction_code` | `"1002"` (Extra Bed), `"MINIBAR"` |
+
+Opera Room Charge (1000), SC (1018), VAT (1017), and Cash FO (6000) are typically not mapped — they represent rates/taxes that should be filtered out by the registration sync rather than imported as service bills.
+
+### CLI
+
+```
 php index.php OhipSync services
 ```
 
-### Scheduling (Cron)
+Fetches all registrations with `opera_id`, then runs `syncServices()` on each.
 
-```cron
-*/5 * * * * php /path/to/index.php OhipSync registrations
-*/5 * * * * php /path/to/index.php OhipSync restaurant_charges
-*/5 * * * * php /path/to/index.php OhipSync services
-0 */6 * * * php /path/to/index.php OhipSync reservations $(date +\%Y-\%m-\%d)
-```
+---
 
-## API Reference
+## 6. All CLI Endpoints
 
-All calls use the Oracle Hospitality Integration Platform (OHIP) REST API.
+| Command | Description |
+|---------|-------------|
+| `php index.php OhipSync reservations` | Sync all Opera reservations (last 7 days) → `fo_reservations` + `fo_registrations` + `fo_room_bills` |
+| `php index.php OhipSync restaurant_charges` | Post unpaid restaurant bills → Opera folio |
+| `php index.php OhipSync services` | Sync Opera folio postings → PMS service bills |
+| `php index.php OhipSync registration_update CONFIRMATION_NO` | Manual: update one registration from Opera detail API |
+| `php index.php OhipSync savePmReservation CONFIRMATION_NO` | Save PM reservation fallback in `sys_opera_config` |
 
-### Authentication
+---
 
-```
-POST /oauth/v1/tokens
-Headers: Authorization: Basic <base64(client_id:client_secret)>, x-app-key, enterpriseId
-Body: grant_type=client_credentials&scope=urn:opc:hgbu:ws:__myscopes__
-```
+## 7. Web UI: Opera Settings
 
-### Reservation List
+**File:** `application/modules/dashboard/views/settings/opera.php`
+**Controller:** `application/modules/dashboard/controllers/Setting.php` (`opera()` / `opera_store()`)
 
-```
-GET /rsv/v1/hotels/{hotelId}/reservations?createdOnStartDate={date}&limit=200
-```
+UI accepts a PMS reservation confirmation number. On save, it resolves the Opera reservation ID via `getReservationByConfirmation()` and stores both in `sys_opera_config`. This is used as the fallback target for walk-in restaurant charges (when `multipay_bill.registration_id` is null).
 
-### Reservation Detail
+---
 
-```
-GET /rsv/v1/hotels/{hotelId}/reservations/{reservationId}
-```
+## 8. Required Manual Mappings
 
-### InHouse List
+| Table | Column | Purpose |
+|-------|--------|---------|
+| `tbl_tablefloor` | `transaction_code` | Opera transaction code for each restaurant outlet |
+| `fo_services` | `transaction_code` | Opera transaction code for each FO service item |
+| `housekeeping_services` | `transaction_code` | Opera transaction code for each HK service item |
+| `roomdetails` | `opera_code` | Opera room type name (e.g. `"KNES"`, `"KNPS"`) for each PMS room type |
+| `payment_method` | `opera_code` | Opera payment method code (CA, VA, BT, UP, CL) for each PMS payment type |
 
-```
-GET /rsv/v1/hotels/{hotelId}/reservations?reservationStatus=InHouse&limit=100
-```
+---
 
-### Post Charges
+## 9. Numbering Conventions
 
-```
-POST /csh/v1/hotels/{hotelId}/reservations/{reservationId}/charges
-```
+| Table | Prefix | Example | Generation |
+|-------|--------|---------|------------|
+| `fo_reservations` | `GR` | `GR00000007` | Max current + 1 |
+| `fo_registrations` | `RR` | `RR00000015` | Max current + 1 |
+| `fo_service_bills` | `SB` | `SB00000023` | Max current + 1 |
+| `housekeeping_service_bills` | `EB` | `EB00000005` | Max current + 1 |
 
-### Fetch Folio
+---
 
-```
-GET /csh/v1/hotels/{hotelId}/reservations/{reservationId}/folios?folioWindowNo=1&limit=50&fetchInstructions=Postings&fetchInstructions=Totalbalance&fetchInstructions=Transactioncodes&fetchInstructions=Windowbalances
-```
+## 10. Error Handling & Idempotency
 
-## Status Mappings
-
-| Opera Status | PMS `fo_reservations.status` | PMS `fo_registrations.checkout_status` |
-|-------------|:---------------------------:|:-------------------------------------:|
-| Reserved | 1 (Confirmed) | N/A |
-| InHouse | N/A | 0 (Active) |
-| CheckedOut | N/A | 1 (Checked out) |
-| Cancelled | 3 (Cancelled) | N/A |
-
-## Numbering Conventions
-
-| Entity | Prefix | Example | Pattern |
-|--------|--------|---------|---------|
-| Reservation | `GR` | `GR00000007` | GR + 8-digit sequential |
-| Registration | `RR` | `RR00000015` | RR + 8-digit sequential |
-| FO Service Bill | `SB` | `SB00000023` | SB + 8-digit sequential |
-| HK Service Bill | `EB` | `EB00000005` | EB + 8-digit sequential |
-
-## Idempotency
-
-| Sync | Mechanism |
-|------|-----------|
-| Registration | `fo_registrations.opera_id` UNIQUE index |
+| Sync | Idempotency Mechanism |
+|------|----------------------|
 | Reservation | `fo_reservations.opera_id` — updates existing row |
+| Registration | `fo_registrations.opera_id` UNIQUE — updates existing row |
+| Room bills | `UNIQUE(date, room, registration_id)` on `fo_room_bills` |
 | Restaurant charge | `multipay_bill.opera_sync` flag (0=unsent, 1=sent) |
-| Folio service | `fo_service_bills.opera_posting_no` — skips duplicates |
+| Folio service | `fo_service_bills.opera_posting_no` — upserts (insert or update) |
 
-## File Reference
+---
 
-| File | Responsibility |
-|------|---------------|
-| `application/libraries/OhipClient.php` | OAuth2 authentication, token caching, cURL HTTP wrapper |
-| `application/libraries/OhipReservation.php` | OHIP reservation detail/folio API endpoints |
-| `application/libraries/OhipPosting.php` | OHIP charge posting endpoint |
-| `application/libraries/OhipFolioSync.php` | Folio fetch, posting extraction, service bill orchestration |
-| `application/libraries/OhipReservationSync.php` | Reservation list fetch, create/update orchestration |
-| `application/models/Ohip_sync_model.php` | All DB queries, inserts, updates, guest/service/rate extraction |
-| `application/controllers/OhipSync.php` | CLI controller dispatching all 4 sync commands |
-| `application/migrations/*.php` | Standalone SQL migration files |
+## 11. Key Design Decisions
 
-## Troubleshooting
+| Decision | Rationale |
+|----------|-----------|
+| `lastModifyStartDate` instead of `createdOnStartDate` | Catches status changes, modifications, cancellations — not just new reservations |
+| Registration sync from list data (no extra API call) | ~50% fewer API calls for large syncs; list response has all needed flat fields |
+| Unified `syncReservations()` handles all statuses | Single pass for Reserved/InHouse/CheckedOut instead of separate endpoints |
+| `chargesAndPayments` flat payload (no `criteria`) | Opera API rejects nested `criteria` wrapper for this endpoint |
+| Multi-window folio fetch | Opera can split folios across windows; one API call may not return all |
+| Service bills upsert by `opera_posting_no` | Re-running sync updates existing bills instead of skipping or duplicating |
+| SC/VAT calculated from settings | Matches the PMS's own room bill calculation formula exactly |
 
-**No reservations found** — Verify `sys_opera_config` credentials and that the Oracle account has reservations.
+---
 
-**Charge posting returns error** — Confirm `tbl_tablefloor.transaction_code` is set and matches an Opera transaction code. Check `cashier_id` in config.
+## 12. File Index
 
-**Folio sync skips all postings** — Populate `fo_services.transaction_code` and `housekeeping_services.transaction_code` with the exact Opera transaction codes appearing in folio postings.
-
-**Room type resolves to 0** — Set `roomdetails.opera_code` to match the Opera room type name (e.g. `"DBL"`, `"KIN"`, `"SUI"`).
-
-## License
-
-MIT
+| File | Role |
+|------|------|
+| `application/libraries/OhipClient.php` | Base API client: auth, token caching, HTTP requests, `getCashierId()` |
+| `application/libraries/OhipReservation.php` | Individual reservation detail + folio API calls (extends OhipClient) |
+| `application/libraries/OhipPosting.php` | Charge + payment posting to Opera (extends OhipClient) |
+| `application/libraries/OhipFolioSync.php` | Multi-window folio fetch + service sync orchestration (extends OhipClient) |
+| `application/libraries/OhipReservationSync.php` | Paginated reservation list + unified sync (extends OhipClient) |
+| `application/models/Ohip_sync_model.php` | All DB operations: inserts, updates, queries, mappings, calculations |
+| `application/controllers/OhipSync.php` | CLI entry points for all sync operations |
+| `application/modules/dashboard/controllers/Setting.php` | Web UI for Opera settings + PM reservation config |
+| `application/modules/dashboard/views/settings/opera.php` | Opera settings view with PM reservation input |

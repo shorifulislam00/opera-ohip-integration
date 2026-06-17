@@ -10,4 +10,22 @@ class OhipPosting extends OhipClient {
         );
         return $result;
     }
+
+    public function postChargesAndPayments($reservation_id, $charges, $payments) {
+        $data = [
+            'charges'   => $charges,
+            'payments'  => $payments,
+            'cashierId' => (int) $this->cashier_id,
+        ];
+        $result = $this->request('POST',
+            '/csh/v1/hotels/' . $this->hotel_id . '/reservations/' . $reservation_id . '/chargesAndPayments',
+            $data
+        );
+
+        // echo "<pre>";
+        // print_r($result);
+        // exit;
+
+        return $result;
+    }
 }

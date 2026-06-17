@@ -5,10 +5,45 @@ class OhipFolioSync extends OhipClient
 {
     public function getFolio($reservation_id)
     {
+        $allPostings = [];
+
+        // First call — discover all windows
         $result = $this->request('GET',
-            '/csh/v1/hotels/' . $this->hotel_id . '/reservations/' . $reservation_id . '/folios?folioWindowNo=1&limit=50&fetchInstructions=Postings&fetchInstructions=Totalbalance&fetchInstructions=Transactioncodes&fetchInstructions=Windowbalances'
+            '/csh/v1/hotels/' . $this->hotel_id . '/reservations/' . $reservation_id . '/folios?limit=300&fetchInstructions=Postings&fetchInstructions=Totalbalance&fetchInstructions=Transactioncodes&fetchInstructions=Windowbalances'
         );
-        return $result['body'];
+        $body    = $result['body'];
+        $windows = $body['reservationFolioInformation']['folioWindows'] ?? [];
+
+        foreach ($windows as $win) {
+            $winNo = $win['folioWindowNo'] ?? null;
+            if (!$winNo) continue;
+
+            if (!empty($win['folios'])) {
+                // Postings already included
+                foreach ($win['folios'] as $f) {
+                    foreach ($f['postings'] ?? [] as $p) {
+                        $allPostings[] = $p;
+                    }
+                }
+            } elseif (!empty($win['emptyFolio']) && empty($win['emptyWindow'])) {
+                // Folios exist but not returned — fetch this window individually
+                $winResult = $this->request('GET',
+                    '/csh/v1/hotels/' . $this->hotel_id . '/reservations/' . $reservation_id . '/folios?folioWindowNo=' . $winNo . '&limit=300&fetchInstructions=Postings'
+                );
+                $winBody    = $winResult['body'];
+                $winWindows = $winBody['reservationFolioInformation']['folioWindows'] ?? [];
+                foreach ($winWindows as $ww) {
+                    foreach ($ww['folios'] ?? [] as $f) {
+                        foreach ($f['postings'] ?? [] as $p) {
+                            $allPostings[] = $p;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Wrap in same structure extractPostings expects
+        return ['reservationFolioInformation' => ['folioWindows' => [['folios' => [['postings' => $allPostings]]]]]];
     }
 
     public function syncServices($registration_id, $opera_id, $room_number, $guest_name)
@@ -38,11 +73,6 @@ class OhipFolioSync extends OhipClient
 
             if (!$txn_code) {
                 $errors++;
-                continue;
-            }
-
-            if ($CI->Ohip_sync_model->isFolioPostingSynced($registration_id, $txn_no)) {
-                $skipped++;
                 continue;
             }
 
