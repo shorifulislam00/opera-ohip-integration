@@ -47,7 +47,7 @@ class Migration_Create_fo_reservation_rate_plan_table
             CONSTRAINT `FK_fo_reservation_rate_plan_user_3` FOREIGN KEY (`deleted_by`) REFERENCES `user` (`id`) ON UPDATE NO ACTION ON DELETE NO ACTION,
             CONSTRAINT `fo_reservation_rate_plan_ibfk_1` FOREIGN KEY (`room_details_id`) REFERENCES `fo_reservations_room_details` (`id`) ON UPDATE NO ACTION ON DELETE NO ACTION,
             CONSTRAINT `fo_reservation_rate_plan_ibfk_2` FOREIGN KEY (`reservation_id`) REFERENCES `fo_reservations` (`id`) ON UPDATE NO ACTION ON DELETE NO ACTION
-        ) COLLATE='utf8mb4_general_ci' ENGINE=InnoDB AUTO_INCREMENT=642;");
+        ) COLLATE='utf8mb4_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

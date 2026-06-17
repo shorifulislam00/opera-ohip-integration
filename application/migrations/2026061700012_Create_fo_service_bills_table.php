@@ -53,7 +53,7 @@ class Migration_Create_fo_service_bills_table
             `service_contact_number` VARCHAR(20) NULL DEFAULT NULL COLLATE 'utf8mb3_unicode_ci',
             `discount_type` INT(10) NULL DEFAULT NULL,
             PRIMARY KEY (`id`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=60;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

@@ -47,7 +47,7 @@ class Migration_Create_fo_room_bills_table
             UNIQUE INDEX `date_room_registration_unique` (`date`, `room`, `registration_id`) USING BTREE,
             INDEX `room` (`room`) USING BTREE,
             INDEX `registration_id` (`registration_id`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=197;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

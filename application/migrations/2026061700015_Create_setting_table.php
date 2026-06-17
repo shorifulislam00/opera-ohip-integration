@@ -92,7 +92,7 @@ class Migration_Create_setting_table
             `warning_icon` TEXT NULL DEFAULT NULL COLLATE 'utf8mb3_unicode_ci',
             `warning_type` TEXT NULL DEFAULT NULL COLLATE 'utf8mb3_unicode_ci',
             PRIMARY KEY (`id`) USING BTREE
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=3;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

@@ -25,7 +25,7 @@ class Migration_Create_tbl_tablefloor_table
             `transaction_code` VARCHAR(50) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
             PRIMARY KEY (`tbfloorid`) USING BTREE,
             INDEX `coa_id` (`coa_id`) USING BTREE
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=6;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

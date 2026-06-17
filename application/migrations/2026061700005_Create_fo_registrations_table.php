@@ -72,7 +72,7 @@ class Migration_Create_fo_registrations_table
             UNIQUE INDEX `opera_id_unique` (`opera_id`) USING BTREE,
             INDEX `reservation_id` (`reservation_id`) USING BTREE,
             INDEX `registration_number` (`registration_number`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=152;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

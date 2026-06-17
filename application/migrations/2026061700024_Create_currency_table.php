@@ -22,7 +22,7 @@ class Migration_Create_currency_table
             `position` INT(10) NOT NULL DEFAULT '1' COMMENT '1=left.2=right',
             `curr_rate` DECIMAL(10,2) NOT NULL DEFAULT '0.00',
             PRIMARY KEY (`currencyid`) USING BTREE
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=3;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

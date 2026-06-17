@@ -31,7 +31,7 @@ class Migration_Create_fo_services_table
             `deleted_by` INT(10) NULL DEFAULT NULL,
             PRIMARY KEY (`id`) USING BTREE,
             INDEX `coa_id` (`coa_id`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=26;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

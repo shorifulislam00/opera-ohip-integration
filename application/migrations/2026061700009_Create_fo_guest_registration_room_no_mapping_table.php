@@ -24,7 +24,7 @@ class Migration_Create_fo_guest_registration_room_no_mapping_table
             INDEX `fo_registration_id` (`fo_registration_id`) USING BTREE,
             INDEX `fo_guest_id` (`fo_guest_id`) USING BTREE,
             INDEX `room_number` (`room_number`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=152;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

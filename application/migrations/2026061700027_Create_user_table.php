@@ -33,7 +33,7 @@ class Migration_Create_user_table
             `usertype` INT(10) NOT NULL DEFAULT '1' COMMENT '1=user,2=employee',
             `is_admin` TINYINT(3) NOT NULL DEFAULT '0',
             PRIMARY KEY (`id`) USING BTREE
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=158;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

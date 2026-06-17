@@ -44,7 +44,7 @@ class Migration_Create_fo_guests_table
             `is_contact_person` TINYINT(1) NOT NULL DEFAULT '0',
             `document_info` TEXT NULL DEFAULT NULL COLLATE 'utf8mb3_unicode_ci',
             PRIMARY KEY (`id`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=352;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

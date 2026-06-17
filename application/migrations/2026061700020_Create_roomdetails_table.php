@@ -63,7 +63,7 @@ class Migration_Create_roomdetails_table
             `aiosell_rateplancode_MAP_d` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_unicode_ci',
             PRIMARY KEY (`roomid`) USING BTREE,
             INDEX `roomtype` (`roomtype`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=8;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

@@ -39,7 +39,7 @@ class Migration_Create_acc_automation_table
             CONSTRAINT `acc_automation_chk_1` CHECK (json_valid(`company_head_code_name`)),
             CONSTRAINT `acc_automation_chk_2` CHECK (json_valid(`cost_center_head_code_name`)),
             CONSTRAINT `acc_automation_chk_3` CHECK (json_valid(`cash_in_hand_head_code_name`))
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=2;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()

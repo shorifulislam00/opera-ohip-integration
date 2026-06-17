@@ -59,7 +59,7 @@ class Migration_Create_fo_reservations_room_details_table
             INDEX `reservation_number` (`reservation_number`) USING BTREE,
             INDEX `room_type` (`room_type`) USING BTREE,
             INDEX `room_number` (`room_number`) USING BTREE
-        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB AUTO_INCREMENT=201;");
+        ) COLLATE='utf8mb3_unicode_ci' ENGINE=InnoDB;");
     }
 
     public function down()

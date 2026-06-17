@@ -31,7 +31,7 @@ class Migration_Create_housekeeping_services_table
             `deleted_at` DATETIME NULL DEFAULT NULL,
             `is_deleted` TINYINT(1) NOT NULL DEFAULT '0',
             PRIMARY KEY (`id`) USING BTREE
-        ) COLLATE='utf8mb4_0900_ai_ci' ENGINE=InnoDB AUTO_INCREMENT=102;");
+        ) COLLATE='utf8mb4_0900_ai_ci' ENGINE=InnoDB;");
     }
 
     public function down()

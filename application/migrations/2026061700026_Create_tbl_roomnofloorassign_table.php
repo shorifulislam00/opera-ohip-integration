@@ -22,7 +22,7 @@ class Migration_Create_tbl_roomnofloorassign_table
             `roomno` INT(10) NOT NULL,
             `status` INT(10) NULL DEFAULT '1' COMMENT '1=ready,2=booked,3=assigned to clean,4=booked and assigned to clean, 5=under maintenance,6=dirty,7=blocked,8=do not reserve',
             PRIMARY KEY (`roomassignid`) USING BTREE
-        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB AUTO_INCREMENT=104;");
+        ) COLLATE='utf8mb3_general_ci' ENGINE=InnoDB;");
     }
 
     public function down()
