@@ -50,16 +50,14 @@ Run the migrations in order on an empty database. Each migration creates one tab
 | 17 | `2026061700017` | `multipay_bill` | `opera_sync` |
 | 18 | `2026061700018` | `sys_opera_config` | OHIP connection config (new) |
 | 19 | `2026061700019` | `ohip_tokens` | OAuth2 token cache (new) |
-
-**Additional tables** (not part of migrations — assumed to exist or created separately):
-- `roomdetails` — requires `opera_code` column for room type mapping
-- `fo_room_bills` — per-night room billing
-- `fo_guests` — guest profiles
-- `customer_order` — restaurant orders
-- `currency` — currency reference
-- `acc_automation` — M-Banking head code mapping
-- `tbl_roomnofloorassign` — room number to floor assignment
-- `user` — system users (referenced by rate plan FKs)
+| 20 | `2026061700020` | `roomdetails` | `opera_code` for room type mapping |
+| 21 | `2026061700021` | `fo_room_bills` | Per-night room billing (UNIQUE per date/room/registration) |
+| 22 | `2026061700022` | `fo_guests` | Guest profiles |
+| 23 | `2026061700023` | `customer_order` | Restaurant orders |
+| 24 | `2026061700024` | `currency` | Currency reference |
+| 25 | `2026061700025` | `acc_automation` | M-Banking head code mapping |
+| 26 | `2026061700026` | `tbl_roomnofloorassign` | Room number to floor/type assignment |
+| 27 | `2026061700027` | `user` | System users (referenced by rate plan FKs) |
 
 ---
 
@@ -464,5 +462,6 @@ UI accepts a PMS reservation confirmation number. On save, it resolves the Opera
 | `2026061700001` through `2026061700017` | Core PMS tables with Opera columns embedded |
 | `2026061700018` | `sys_opera_config` — OHIP connection settings |
 | `2026061700019` | `ohip_tokens` — OAuth2 token cache |
+| `2026061700020` through `2026061700027` | Supporting PMS tables (roomdetails, fo_room_bills, fo_guests, customer_order, currency, acc_automation, tbl_roomnofloorassign, user) |
 
 Run in ascending order on an empty database.
