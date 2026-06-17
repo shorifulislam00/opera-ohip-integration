@@ -25,74 +25,41 @@ Integration direction:
 
 ---
 
-## 1. Base Setup
+## 1. Database Setup
 
-### 1.1 Database Config Table
+Run the migrations in order on an empty database. Each migration creates one table from scratch with all columns, indexes, and constraints.
 
-Create `sys_opera_config` with these columns:
+| # | File | Table | Key Opera Columns |
+|---|------|-------|-------------------|
+| 1 | `2026061700001` | `fo_reservations` | `opera_id` (UNIQUE) |
+| 2 | `2026061700002` | `fo_reservations_other_info` | — |
+| 3 | `2026061700003` | `fo_reservations_room_details` | — |
+| 4 | `2026061700004` | `fo_reservation_rate_plan` | — |
+| 5 | `2026061700005` | `fo_registrations` | `opera_id` (UNIQUE) |
+| 6 | `2026061700006` | `fo_registrations_other_info` | — |
+| 7 | `2026061700007` | `fo_registration_rate_plan` | — |
+| 8 | `2026061700008` | `fo_registration_room_details` | — |
+| 9 | `2026061700009` | `fo_guest_registration_room_no_mapping` | — |
+| 10 | `2026061700010` | `tbl_tablefloor` | `transaction_code` |
+| 11 | `2026061700011` | `fo_services` | `transaction_code` |
+| 12 | `2026061700012` | `fo_service_bills` | `opera_posting_no` |
+| 13 | `2026061700013` | `housekeeping_services` | `transaction_code` |
+| 14 | `2026061700014` | `housekeeping_service_bills` | `opera_posting_no` |
+| 15 | `2026061700015` | `setting` | — |
+| 16 | `2026061700016` | `payment_method` | `opera_code` |
+| 17 | `2026061700017` | `multipay_bill` | `opera_sync` |
+| 18 | `2026061700018` | `sys_opera_config` | OHIP connection config (new) |
+| 19 | `2026061700019` | `ohip_tokens` | OAuth2 token cache (new) |
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `hostname` | VARCHAR | OHIP base URL |
-| `hotel_id` | VARCHAR | Opera hotel/enterprise ID |
-| `app_key` | VARCHAR | x-app-key header |
-| `enterprise_id` | VARCHAR | Enterprise ID for token auth |
-| `client_id` / `client_secret` | VARCHAR | Basic auth credentials |
-| `cashier_id` | VARCHAR | Cashier ID for charge posting |
-
-### 1.2 Token Cache Table
-
-`ohip_tokens` — stores OAuth2 access token:
-
-| Column | Type |
-|--------|------|
-| `access_token` | TEXT |
-| `expires_at` | INT (unix timestamp) |
-| `created_at` | DATETIME |
-
-### 1.3 DB Schema Changes (Migrations)
-
-#### 2026060700001 — `fo_registrations.opera_id`
-```sql
-ALTER TABLE fo_registrations ADD COLUMN opera_id VARCHAR(50) UNIQUE AFTER id;
-```
-
-#### 2026060700002 — Restaurant charge posting columns
-```sql
-ALTER TABLE tbl_tablefloor ADD COLUMN transaction_code VARCHAR(50);
-ALTER TABLE multipay_bill ADD COLUMN opera_sync TINYINT(1) DEFAULT 0;
-```
-
-#### 2026060800001 — FO/HK service transaction codes
-```sql
-ALTER TABLE fo_services ADD COLUMN transaction_code VARCHAR(50);
-ALTER TABLE housekeeping_services ADD COLUMN transaction_code VARCHAR(50);
-```
-
-#### 2026060800002 — `opera_posting_no` on bill tables
-```sql
-ALTER TABLE fo_service_bills ADD COLUMN opera_posting_no VARCHAR(50) AFTER service_no;
-ALTER TABLE housekeeping_service_bills ADD COLUMN opera_posting_no VARCHAR(50) AFTER service_no;
-```
-
-#### 2026060800003 — `fo_reservations.opera_id`
-```sql
-ALTER TABLE fo_reservations ADD COLUMN opera_id VARCHAR(50) AFTER id;
-```
-
-#### 2026060800004 — `roomdetails.opera_code`
-```sql
-ALTER TABLE roomdetails ADD COLUMN opera_code VARCHAR(50);
-```
-
-#### 2026061100001 — `payment_method.opera_code`, drop `opera_payment_method_mapping`
-```sql
-ALTER TABLE payment_method ADD COLUMN opera_code VARCHAR(50);
-DROP TABLE opera_payment_method_mapping;
-```
-
-#### 2026061100002 — Seed `roomdetails.opera_code`
-Seeds KNES (Jun Suite), KNPS (Premium), TNPS (Twin Premium), KNXB (Deluxe), KNEP (Exec Suite), KNEB (Suite).
+**Additional tables** (not part of migrations — assumed to exist or created separately):
+- `roomdetails` — requires `opera_code` column for room type mapping
+- `fo_room_bills` — per-night room billing
+- `fo_guests` — guest profiles
+- `customer_order` — restaurant orders
+- `currency` — currency reference
+- `acc_automation` — M-Banking head code mapping
+- `tbl_roomnofloorassign` — room number to floor assignment
+- `user` — system users (referenced by rate plan FKs)
 
 ---
 
@@ -476,6 +443,8 @@ UI accepts a PMS reservation confirmation number. On save, it resolves the Opera
 
 ## 12. File Index
 
+### Application Code
+
 | File | Role |
 |------|------|
 | `application/libraries/OhipClient.php` | Base API client: auth, token caching, HTTP requests, `getCashierId()` |
@@ -487,3 +456,13 @@ UI accepts a PMS reservation confirmation number. On save, it resolves the Opera
 | `application/controllers/OhipSync.php` | CLI entry points for all sync operations |
 | `application/modules/dashboard/controllers/Setting.php` | Web UI for Opera settings + PM reservation config |
 | `application/modules/dashboard/views/settings/opera.php` | Opera settings view with PM reservation input |
+
+### Migrations (`application/migrations/`)
+
+| File | Creates |
+|------|---------|
+| `2026061700001` through `2026061700017` | Core PMS tables with Opera columns embedded |
+| `2026061700018` | `sys_opera_config` — OHIP connection settings |
+| `2026061700019` | `ohip_tokens` — OAuth2 token cache |
+
+Run in ascending order on an empty database.
